@@ -21,6 +21,7 @@ class WhatsAppManager {
     this.sessions = new Map();
     this.qrCodes = new Map();
     this.roundRobin = new Map();
+    this.pairingLocks = new Map();
     this.io = null;
   }
 
@@ -87,6 +88,39 @@ class WhatsAppManager {
     return { id: result.insertId, sender_name: senderName, status: 'pending_qr' };
   }
 
+  async teardownSession(userId, sessionId, { clearFiles = false } = {}) {
+    userId = Number(userId);
+    sessionId = Number(sessionId);
+    const key = this.sessionKey(sessionId);
+    const session = this.sessions.get(key);
+
+    if (session?.sock) {
+      try { session.sock.ev.removeAllListeners('connection.update'); } catch (_) { /* ignore */ }
+      try { session.sock.ev.removeAllListeners('creds.update'); } catch (_) { /* ignore */ }
+      try { session.sock.end(undefined); } catch (_) { /* ignore */ }
+    }
+
+    this.sessions.delete(key);
+    this.qrCodes.delete(key);
+
+    if (clearFiles) {
+      const sessionDir = this.getSessionDir(userId, sessionId);
+      if (fs.existsSync(sessionDir)) {
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  async resetSenderForPairing(userId, sessionId) {
+    await this.teardownSession(userId, sessionId, { clearFiles: true });
+    await pool.query(
+      `UPDATE wa_sessions
+       SET status = 'pending_qr', phone_number = NULL, display_name = NULL, last_active = NOW()
+       WHERE id = ? AND user_id = ?`,
+      [sessionId, userId]
+    );
+  }
+
   async restoreSessions() {
     const [rows] = await pool.query(
       "SELECT id, user_id FROM wa_sessions WHERE status IN ('connected', 'connecting')"
@@ -118,13 +152,18 @@ class WhatsAppManager {
       if (existing.status === 'connected') {
         return { sessionId, status: 'connected', phone: existing.phone, name: existing.name };
       }
-      if (existing.status === 'connecting' && this.qrCodes.has(key)) {
-        const cached = this.qrCodes.get(key);
-        if (emitQr && cached?.data) {
+
+      const cached = this.qrCodes.get(key);
+      const qrAge = cached?.at ? Date.now() - cached.at : Infinity;
+
+      if (existing.status === 'connecting' && cached?.data && qrAge < 60000) {
+        if (emitQr) {
           this.emit(userId, 'wa:qr', { sessionId, qr: cached.data });
         }
-        return { sessionId, status: 'connecting', qr: cached?.data || null };
+        return { sessionId, status: 'connecting', qr: cached.data };
       }
+
+      await this.teardownSession(userId, sessionId, { clearFiles: false });
     }
 
     const sessionDir = this.getSessionDir(userId, sessionId);
@@ -197,22 +236,22 @@ class WhatsAppManager {
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
-        const banned = loggedOut;
+        const reason = loggedOut ? 'logged_out' : 'connection_closed';
 
-        sessionData.status = banned ? 'banned' : 'pending_qr';
-        this.sessions.delete(key);
-        this.qrCodes.delete(key);
-
-        await pool.query(
-          `UPDATE wa_sessions SET status = ?, last_active = NOW() WHERE id = ?`,
-          [banned ? 'banned' : 'pending_qr', sessionId]
+        console.warn(
+          `[WhatsAppManager] Sender ${sessionId} disconnected (code=${statusCode || 'unknown'}, loggedOut=${loggedOut})`
         );
 
-        this.emit(userId, 'wa:disconnected', {
-          sessionId,
-          reason: banned ? 'logged_out' : 'connection_closed'
-        });
-        this.emit(userId, 'wa:status', { sessionId, status: banned ? 'banned' : 'pending_qr' });
+        await this.teardownSession(userId, sessionId, { clearFiles: loggedOut });
+
+        const newStatus = loggedOut ? 'pending_qr' : 'pending_qr';
+        await pool.query(
+          `UPDATE wa_sessions SET status = ?, last_active = NOW() WHERE id = ?`,
+          [newStatus, sessionId]
+        );
+
+        this.emit(userId, 'wa:disconnected', { sessionId, reason });
+        this.emit(userId, 'wa:status', { sessionId, status: newStatus });
 
         if (!loggedOut && statusCode !== DisconnectReason.loggedOut) {
           setTimeout(() => this.createSession(userId, sessionId, false), 8000);
@@ -228,8 +267,42 @@ class WhatsAppManager {
     return cached?.data || null;
   }
 
-  async pairSender(userId, sessionId) {
-    return this.createSession(userId, sessionId, true);
+  async pairSender(userId, sessionId, { fresh = true } = {}) {
+    userId = Number(userId);
+    sessionId = Number(sessionId);
+    const key = this.sessionKey(sessionId);
+
+    if (this.pairingLocks.get(key)) {
+      const cached = this.qrCodes.get(key);
+      return { sessionId, status: 'connecting', qr: cached?.data || null };
+    }
+
+    this.pairingLocks.set(key, true);
+    try {
+      const [rows] = await pool.query(
+        'SELECT status FROM wa_sessions WHERE id = ? AND user_id = ?',
+        [sessionId, userId]
+      );
+      if (!rows.length) throw new Error('Sender not found');
+
+      const live = this.sessions.get(key);
+      if (live?.status === 'connected') {
+        return {
+          sessionId,
+          status: 'connected',
+          phone: live.phone,
+          name: live.name
+        };
+      }
+
+      if (fresh || ['pending_qr', 'banned', 'disconnected'].includes(rows[0].status)) {
+        await this.resetSenderForPairing(userId, sessionId);
+      }
+
+      return this.createSession(userId, sessionId, true);
+    } finally {
+      setTimeout(() => this.pairingLocks.delete(key), 3000);
+    }
   }
 
   async deleteSender(userId, sessionId) {
@@ -246,13 +319,7 @@ class WhatsAppManager {
       }
     }
 
-    this.sessions.delete(key);
-    this.qrCodes.delete(key);
-
-    const sessionDir = this.getSessionDir(userId, sessionId);
-    if (fs.existsSync(sessionDir)) {
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-    }
+    await this.teardownSession(userId, sessionId, { clearFiles: true });
 
     await pool.query('DELETE FROM wa_sessions WHERE id = ? AND user_id = ?', [sessionId, userId]);
     this.emit(userId, 'wa:status', { sessionId, status: 'deleted' });

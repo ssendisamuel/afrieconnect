@@ -42,15 +42,41 @@ router.post('/senders', [
 router.post('/senders/:id/pair', async (req, res) => {
   try {
     const sessionId = Number(req.params.id);
-    const result = await WhatsAppManager.pairSender(req.user.id, sessionId);
+    const fresh = req.body?.fresh !== false;
+    const result = await WhatsAppManager.pairSender(req.user.id, sessionId, { fresh });
 
     let qrImage = null;
-    const qr = WhatsAppManager.getQr(sessionId);
+    let qr = WhatsAppManager.getQr(sessionId);
+    if (!qr) {
+      await new Promise(r => setTimeout(r, 2000));
+      qr = WhatsAppManager.getQr(sessionId);
+    }
     if (qr) {
       qrImage = await QRCode.toDataURL(qr, { width: 280, margin: 2 });
     }
 
     res.json({ success: true, ...result, qr, qr_image: qrImage });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/senders/:id/repair', async (req, res) => {
+  try {
+    const sessionId = Number(req.params.id);
+    const result = await WhatsAppManager.pairSender(req.user.id, sessionId, { fresh: true });
+
+    let qrImage = null;
+    let qr = WhatsAppManager.getQr(sessionId);
+    if (!qr) {
+      await new Promise(r => setTimeout(r, 2000));
+      qr = WhatsAppManager.getQr(sessionId);
+    }
+    if (qr) {
+      qrImage = await QRCode.toDataURL(qr, { width: 280, margin: 2 });
+    }
+
+    res.json({ success: true, ...result, qr, qr_image: qrImage, repaired: true });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
   }
@@ -62,8 +88,8 @@ router.get('/senders/:id/qr', async (req, res) => {
     let qr = WhatsAppManager.getQr(sessionId);
 
     if (!qr) {
-      await WhatsAppManager.pairSender(req.user.id, sessionId);
-      await new Promise(r => setTimeout(r, 1500));
+      await WhatsAppManager.pairSender(req.user.id, sessionId, { fresh: false });
+      await new Promise(r => setTimeout(r, 2000));
       qr = WhatsAppManager.getQr(sessionId);
     }
 

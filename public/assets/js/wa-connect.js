@@ -15,6 +15,7 @@
     <div class="alert alert-sender-pool rounded-3 mb-4">
       <strong>Workspace Sender Pool</strong><br>
       <span id="pool-summary">Connected senders: 0</span>. Add more WhatsApp numbers so bulk campaigns can spread delivery across your sender pool.
+      <div class="small mt-2 text-muted">If WhatsApp unlinks a device after bulk sends, click <strong>Repair</strong>, wait for the QR, and scan again. Use slower campaign delays (10–15s) to reduce unlinking.</div>
     </div>
 
     <div class="content-card table-card">
@@ -71,6 +72,7 @@
               <div class="spinner-border text-success"></div>
             </div>
             <p class="small text-muted mb-0" id="qr-status">Generating QR code…</p>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-3 d-none" id="btn-reset-pair">Reset &amp; generate new QR</button>
           </div>
         </div>
       </div>
@@ -81,6 +83,8 @@
   const qrModal = new bootstrap.Modal(document.getElementById('qr-modal'));
   const socket = initSocket();
   let pollTimer = null;
+  let pollAttempts = 0;
+  let qrTimeoutTimer = null;
   let activeSessionId = null;
 
   function senderStatusBadge(status) {
@@ -118,7 +122,7 @@
         <td>${s.messages_sent || 0} / ${s.daily_limit || 200}</td>
         <td>
           <div class="d-flex gap-2">
-            ${s.status !== 'connected' ? `<button class="btn btn-sm btn-outline-primary pair-btn" data-id="${s.id}" data-name="${s.sender_name}"><i class="bi bi-phone me-1"></i>Pair</button>` : ''}
+            ${s.status !== 'connected' ? `<button class="btn btn-sm btn-outline-primary pair-btn" data-id="${s.id}" data-name="${s.sender_name || ''}"><i class="bi bi-phone me-1"></i>${s.status === 'banned' || s.status === 'pending_qr' ? 'Repair' : 'Pair'}</button>` : ''}
             <button class="btn btn-sm btn-outline-danger delete-btn" data-id="${s.id}"><i class="bi bi-trash me-1"></i>Delete</button>
           </div>
         </td>
@@ -155,37 +159,70 @@
       clearInterval(pollTimer);
       pollTimer = null;
     }
+    pollAttempts = 0;
+    if (qrTimeoutTimer) {
+      clearTimeout(qrTimeoutTimer);
+      qrTimeoutTimer = null;
+    }
+    document.getElementById('btn-reset-pair')?.classList.add('d-none');
   }
 
   async function pollQr(sessionId) {
+    pollAttempts += 1;
     try {
       const data = await api(`/api/wa/senders/${sessionId}/qr`);
       if (data.qr_image || data.qr) {
         showQrImage(data.qr_image, data.qr);
         stopPolling();
+      } else if (pollAttempts >= 45) {
+        document.getElementById('qr-status').textContent =
+          'QR not ready yet. Wait a moment, then click Reset & generate new QR.';
+        document.getElementById('btn-reset-pair')?.classList.remove('d-none');
       }
     } catch (_) { /* keep polling */ }
   }
 
-  async function startPairing(sessionId, senderName) {
+  async function startPairing(sessionId, senderName, { repair = false } = {}) {
     activeSessionId = Number(sessionId);
     document.getElementById('qr-sender-label').textContent = senderName ? `Pairing: ${senderName}` : '';
     document.getElementById('qr-container').innerHTML = '<div class="spinner-border text-success"></div>';
-    document.getElementById('qr-status').textContent = 'Generating QR code…';
+    document.getElementById('qr-status').textContent = repair
+      ? 'Resetting session and generating a fresh QR…'
+      : 'Generating QR code…';
+    document.getElementById('btn-reset-pair')?.classList.add('d-none');
     qrModal.show();
     stopPolling();
 
     try {
-      const data = await api(`/api/wa/senders/${sessionId}/pair`, { method: 'POST' });
+      const endpoint = repair
+        ? `/api/wa/senders/${sessionId}/repair`
+        : `/api/wa/senders/${sessionId}/pair`;
+      const data = await api(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ fresh: true })
+      });
+
+      if (data.status === 'connected') {
+        qrModal.hide();
+        showToast('WhatsApp already connected');
+        loadSenders();
+        return;
+      }
+
       if (data.qr_image || data.qr) {
         showQrImage(data.qr_image, data.qr);
       } else {
         pollTimer = setInterval(() => pollQr(sessionId), 2000);
         pollQr(sessionId);
+        qrTimeoutTimer = setTimeout(() => {
+          document.getElementById('btn-reset-pair')?.classList.remove('d-none');
+          document.getElementById('qr-status').textContent =
+            'Still waiting for QR. Click Reset & generate new QR if nothing appears.';
+        }, 30000);
       }
-      if (socket) socket.emit('wa:pair', { sessionId: Number(sessionId) });
     } catch (err) {
       document.getElementById('qr-status').textContent = err.message;
+      document.getElementById('btn-reset-pair')?.classList.remove('d-none');
       showToast(err.message, 'error');
     }
   }
@@ -235,6 +272,12 @@
   });
 
   document.getElementById('qr-modal').addEventListener('hidden.bs.modal', stopPolling);
+
+  document.getElementById('btn-reset-pair')?.addEventListener('click', () => {
+    if (!activeSessionId) return;
+    const label = document.getElementById('qr-sender-label').textContent.replace(/^Pairing:\s*/, '');
+    startPairing(activeSessionId, label, { repair: true });
+  });
 
   if (socket) {
     socket.on('wa:qr', ({ sessionId, qr }) => {
