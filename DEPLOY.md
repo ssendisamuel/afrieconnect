@@ -114,10 +114,19 @@ Point `afrieconnect.afriezon.com` at `http://127.0.0.1:3600`.
 **Apache (cPanel)** — create or edit `.htaccess` in this folder:
 
 ```apache
+DirectoryIndex disabled
 RewriteEngine On
+
+# cPanel defaults to index.php; proxy app root to Node instead
+RewriteRule ^$ http://127.0.0.1:3600/ [P,L]
+RewriteRule ^index\.php$ http://127.0.0.1:3600/ [P,L]
+
 RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ http://127.0.0.1:3600/$1 [P,L]
 ```
+
+Set permissions so Apache can read it: `chmod 755 . && chmod 644 .htaccess`
 
 Proxy module must be enabled in cPanel (Apache Configuration → Include Editor, or ask host to enable `mod_proxy`).
 

@@ -58,6 +58,11 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// cPanel often resolves / to /index.php before proxying to Node
+app.get(['/', '/index.php'], (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.use('/api/sms/webhook', require('./src/routes/smsWebhooks'));
 app.use('/api/v1/sms', require('./src/routes/smsApi'));
 app.use('/api/auth', require('./src/routes/auth'));
