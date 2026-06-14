@@ -161,7 +161,15 @@ Configure Flutterwave in Admin → Payment Gateways.
 On the **server**:
 
 ```bash
-cd /home/afriezon/afrieconnect.afriezon.com && ./deploy.sh
+cd /home/afriezon/afrieconnect.afriezon.com
+chmod +x deploy.sh   # once, if "Permission denied"
+./deploy.sh
+```
+
+Or without execute permission:
+
+```bash
+bash deploy.sh
 ```
 
 From your **Mac** (after `export DEPLOY_SSH=root@YOUR_SERVER_IP` once):
