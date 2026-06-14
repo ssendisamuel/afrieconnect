@@ -156,15 +156,29 @@ Proxy module must be enabled in cPanel (Apache Configuration → Include Editor,
 
 Configure Flutterwave in Admin → Payment Gateways.
 
-## 6. Updates
+## 6. Updates (one command)
 
-Always work from the subdomain folder:
+On the **server**:
+
+```bash
+cd /home/afriezon/afrieconnect.afriezon.com && ./deploy.sh
+```
+
+From your **Mac** (after `export DEPLOY_SSH=root@YOUR_SERVER_IP` once):
+
+```bash
+./scripts/deploy-remote.sh
+```
+
+The deploy script pulls latest code, runs `npm install --omit=dev`, fixes permissions, restarts PM2, and checks `/api/health`.
+
+Manual steps (same as the script):
 
 ```bash
 cd /home/afriezon/afrieconnect.afriezon.com
 git pull origin main
 npm install --omit=dev
-pm2 restart afrieconnect
+pm2 restart afrieconnect --update-env
 ```
 
 ## 7. WhatsApp sessions
