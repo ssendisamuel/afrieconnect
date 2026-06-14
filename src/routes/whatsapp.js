@@ -362,7 +362,7 @@ router.get('/reports', async (req, res) => {
   );
 
   const [campaigns] = await pool.query(
-    `SELECT id, name, status, sent_count, failed_count, total_contacts, created_at
+    `SELECT id, name, status, sent_count, failed_count, total_contacts, delay_seconds, daily_cap, created_at
      FROM campaigns WHERE user_id = ? AND channel = 'whatsapp'
      ORDER BY created_at DESC LIMIT 20`,
     [req.user.id]

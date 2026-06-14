@@ -74,8 +74,9 @@
           </div>
           <div class="row g-3 mb-3">
             <div class="col-md-6">
-              <label class="form-label">Delay: <strong id="delay-val">8</strong>s (min 8s + jitter)</label>
-              <input type="range" class="form-range" id="campaign-delay" min="8" max="30" value="8">
+              <label class="form-label">Delay: <strong id="delay-val">12</strong>s (min 8s + jitter)</label>
+              <input type="range" class="form-range" id="campaign-delay" min="8" max="60" value="12">
+              <div class="form-text">Recommended 12–15s+ for bulk to avoid WhatsApp unlinking.</div>
             </div>
             <div class="col-md-6">
               <label class="form-label">Daily cap (this campaign)</label>

@@ -55,8 +55,15 @@
       <div class="small text-muted d-flex align-items-center gap-2 flex-wrap mb-1">
         <span class="campaign-status">${statusBadge(c.status)}</span>
         <span class="campaign-count">${c.sent_count}/${c.total_contacts} sent</span>
+        ${isActive ? `<span class="campaign-delay-label">${c.delay_seconds || 8}s delay</span>` : ''}
         ${canResume ? `<button type="button" class="btn btn-sm btn-outline-success btn-resume-campaign" data-id="${c.id}">Resume now</button>` : ''}
       </div>
+      ${isActive ? `
+        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+          <input type="range" class="form-range flex-grow-1 campaign-delay-range" data-id="${c.id}" min="8" max="60" value="${c.delay_seconds || 8}" style="max-width:180px">
+          <button type="button" class="btn btn-sm btn-outline-secondary btn-save-delay" data-id="${c.id}">Update speed</button>
+        </div>
+      ` : ''}
       ${isActive || pct > 0 ? `
         <div class="progress mt-1" style="height:8px">
           <div class="progress-bar ${barClass}" style="width:${pct}%"></div>
@@ -102,6 +109,25 @@
           await api(`/api/campaigns/${btn.dataset.id}/resume`, { method: 'POST' });
           showToast('Campaign resumed');
           loadReports();
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-save-delay').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const range = document.querySelector(`.campaign-delay-range[data-id="${id}"]`);
+        const delay = Number(range?.value || 12);
+        try {
+          await api(`/api/campaigns/${id}/settings`, {
+            method: 'PATCH',
+            body: JSON.stringify({ delay_seconds: delay })
+          });
+          showToast(`Delay set to ${delay}s — applies before next message`);
+          const label = document.querySelector(`[data-campaign-id="${id}"] .campaign-delay-label`);
+          if (label) label.textContent = `${delay}s delay`;
         } catch (err) {
           showToast(err.message, 'error');
         }

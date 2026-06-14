@@ -201,8 +201,13 @@ class CampaignRunner {
       }
       if (control.stopped) break;
 
-      const [fresh] = await pool.query('SELECT sent_count, status FROM campaigns WHERE id = ?', [campaignId]);
+      const [fresh] = await pool.query(
+        'SELECT sent_count, status, delay_seconds, daily_cap FROM campaigns WHERE id = ?',
+        [campaignId]
+      );
       campaign.sent_count = fresh[0].sent_count;
+      campaign.delay_seconds = fresh[0].delay_seconds ?? campaign.delay_seconds;
+      campaign.daily_cap = fresh[0].daily_cap ?? campaign.daily_cap;
 
       if (fresh[0].status === 'paused') {
         control.paused = true;
@@ -213,7 +218,7 @@ class CampaignRunner {
       }
 
       const todaySent = await this.getTodaySentCount(campaignId);
-      if (todaySent >= dailyCap) {
+      if (todaySent >= (campaign.daily_cap || 200)) {
         await pool.query("UPDATE campaigns SET status = 'paused' WHERE id = ?", [campaignId]);
         control.paused = true;
         break;

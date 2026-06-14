@@ -80,6 +80,62 @@ router.post('/:id/resume', async (req, res) => {
   res.json({ success: true, message: 'Campaign resumed' });
 });
 
+router.patch('/:id/settings', [
+  body('delay_seconds').optional().isInt({ min: 8, max: 120 }),
+  body('daily_cap').optional().isInt({ min: 1, max: 5000 })
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+
+  const [campaigns] = await pool.query(
+    'SELECT id, status, channel FROM campaigns WHERE id = ? AND user_id = ?',
+    [req.params.id, req.user.id]
+  );
+  if (!campaigns.length) {
+    return res.status(404).json({ success: false, message: 'Campaign not found' });
+  }
+
+  const allowed = ['running', 'paused', 'queued', 'draft'];
+  if (!allowed.includes(campaigns[0].status)) {
+    return res.status(400).json({ success: false, message: 'Cannot change settings for a completed campaign' });
+  }
+
+  const updates = [];
+  const values = [];
+  if (req.body.delay_seconds != null) {
+    updates.push('delay_seconds = ?');
+    values.push(parseInt(req.body.delay_seconds, 10));
+  }
+  if (req.body.daily_cap != null) {
+    updates.push('daily_cap = ?');
+    values.push(parseInt(req.body.daily_cap, 10));
+  }
+  if (!updates.length) {
+    return res.status(400).json({ success: false, message: 'Nothing to update' });
+  }
+
+  values.push(req.params.id, req.user.id);
+  await pool.query(
+    `UPDATE campaigns SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`,
+    values
+  );
+
+  const [updated] = await pool.query(
+    'SELECT delay_seconds, daily_cap, status FROM campaigns WHERE id = ?',
+    [req.params.id]
+  );
+
+  res.json({
+    success: true,
+    message: 'Campaign settings updated — takes effect before the next message',
+    delay_seconds: updated[0].delay_seconds,
+    daily_cap: updated[0].daily_cap,
+    status: updated[0].status
+  });
+});
+
 router.get('/:id/logs', async (req, res) => {
   const page = parseInt(req.query.page || '1', 10);
   const limit = parseInt(req.query.limit || '50', 10);
