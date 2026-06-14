@@ -34,6 +34,22 @@ node src/seed.js
 pm2 restart afrieconnect --update-env
 ```
 
+**Unicode / contact import errors** (`Incorrect string value` for `contacts.name`): production tables may have been created without `utf8mb4`. Fix once:
+
+```bash
+mysql -u afriezon_afrieco -p afriezon_afrieco <<'SQL'
+ALTER DATABASE afriezon_afrieco CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE contacts CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE contact_lists CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE users CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE templates CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE campaigns CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE message_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+SQL
+```
+
+Or `git pull` and `pm2 restart afrieconnect --update-env` — migrations convert tables automatically on startup.
+
 ## 3. First deploy (inside the subdomain folder)
 
 ```bash

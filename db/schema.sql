@@ -18,7 +18,7 @@ CREATE TABLE users (
   plan            ENUM('free','starter','business','enterprise') DEFAULT 'free',
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE wa_sessions (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -33,7 +33,7 @@ CREATE TABLE wa_sessions (
   daily_limit     INT           DEFAULT 200,
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE contact_lists (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -43,7 +43,7 @@ CREATE TABLE contact_lists (
   contact_count   INT           DEFAULT 0,
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE contacts (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -57,7 +57,7 @@ CREATE TABLE contacts (
   FOREIGN KEY (list_id)  REFERENCES contact_lists(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_list_phone (list_id, phone)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE templates (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -67,7 +67,7 @@ CREATE TABLE templates (
   channel         ENUM('whatsapp','sms','both') DEFAULT 'both',
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE campaigns (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -93,7 +93,7 @@ CREATE TABLE campaigns (
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (list_id)  REFERENCES contact_lists(id) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE message_logs (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -112,7 +112,7 @@ CREATE TABLE message_logs (
   FOREIGN KEY (user_id)     REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_user_status (user_id, status),
   INDEX idx_campaign (campaign_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE otp_codes (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -127,7 +127,7 @@ CREATE TABLE otp_codes (
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_phone_code (phone, otp_code)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE platform_sms_log (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -141,7 +141,7 @@ CREATE TABLE platform_sms_log (
   tracking_code   VARCHAR(100)  NULL,
   sent_at         DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (admin_id) REFERENCES users(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE notifications (
   id              INT AUTO_INCREMENT PRIMARY KEY,
@@ -152,7 +152,7 @@ CREATE TABLE notifications (
   is_read         TINYINT(1)    DEFAULT 0,
   created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Extended columns/tables applied by src/utils/migrate.js on startup:
 -- users.wallet_balance, campaigns.campaign_url, campaigns.status (+cancelled),

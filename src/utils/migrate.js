@@ -37,10 +37,41 @@ async function ensureBaseSchema(pool) {
   }
 
   console.log('[Migrate] Base schema created from db/schema.sql');
+  await ensureUtf8mb4(pool);
+}
+
+async function ensureUtf8mb4(pool) {
+  const [[{ db }]] = await pool.query('SELECT DATABASE() AS db');
+  if (!db) return;
+
+  await pool.query(`ALTER DATABASE \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+
+  const tables = [
+    'users', 'wa_sessions', 'contact_lists', 'contacts', 'templates', 'campaigns',
+    'message_logs', 'otp_codes', 'platform_sms_log', 'notifications',
+    'sms_inbox', 'wallet_transactions', 'payment_transactions',
+    'integration_gateways', 'user_sender_ids'
+  ];
+
+  for (const table of tables) {
+    if (!(await tableExists(pool, table))) continue;
+
+    const [[meta]] = await pool.query(
+      `SELECT TABLE_COLLATION AS collation FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [table]
+    );
+
+    if (meta?.collation && !String(meta.collation).startsWith('utf8mb4')) {
+      await pool.query(`ALTER TABLE \`${table}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      console.log(`[Migrate] Converted ${table} to utf8mb4`);
+    }
+  }
 }
 
 async function runMigrations(pool) {
   await ensureBaseSchema(pool);
+  await ensureUtf8mb4(pool);
 
   if (await tableExists(pool, 'campaigns')) {
     try {
@@ -82,9 +113,9 @@ async function runMigrations(pool) {
         message TEXT NOT NULL,
         received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         is_read TINYINT(1) DEFAULT 0,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_user_received (user_id, received_at)
-      )
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_user_received (user_id, received_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
   }
 
@@ -110,7 +141,7 @@ async function runMigrations(pool) {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         INDEX idx_user_created (user_id, created_at),
         INDEX idx_type (type)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
   }
 
@@ -131,7 +162,7 @@ async function runMigrations(pool) {
         completed_at DATETIME NULL,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         INDEX idx_user_status (user_id, status)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
   }
 
@@ -159,7 +190,7 @@ async function runMigrations(pool) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_category_provider (category, provider)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
   } else {
     try {
@@ -186,7 +217,7 @@ async function runMigrations(pool) {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE KEY uq_user_sender (user_id, sender_id),
         INDEX idx_status (status)
-      )
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
   }
 }
