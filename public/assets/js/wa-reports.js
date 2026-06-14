@@ -2,10 +2,13 @@
   if (!requireAuth()) return;
   renderAppShell('wa-reports');
 
+  let pollTimer = null;
+  let statsReloadTimer = null;
+
   document.getElementById('page-content').innerHTML = `
     <div class="mb-4">
       <h4 class="mb-1 fw-bold">WhatsApp Reports</h4>
-      <p class="text-muted mb-0">Delivery stats by day and sender line. Paused campaigns auto-resume at midnight, or resume manually below.</p>
+      <p class="text-muted mb-0">Delivery stats by day and sender line. Updates automatically while campaigns run.</p>
     </div>
     <div class="row g-4">
       <div class="col-lg-7">
@@ -32,20 +35,86 @@
     </div>
   `;
 
-  window.resumeCampaign = async function (id) {
-    try {
-      await api(`/api/campaigns/${id}/resume`, { method: 'POST' });
-      showToast('Campaign resumed');
-      setTimeout(() => location.reload(), 800);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  };
+  function campaignProgress(c) {
+    const done = (c.sent_count || 0) + (c.failed_count || 0);
+    const total = c.total_contacts || 0;
+    if (!total) return 0;
+    return Math.min(100, Math.round((done / total) * 100));
+  }
 
-  api('/api/wa/reports').then(data => {
+  function renderCampaignRow(c) {
+    const pct = campaignProgress(c);
+    const isActive = ['running', 'paused', 'queued'].includes(c.status);
+    const canResume = c.status === 'paused' && c.sent_count + c.failed_count < c.total_contacts;
+    const barClass = c.status === 'failed'
+      ? 'bg-danger'
+      : (c.status === 'running' ? 'progress-bar-striped progress-bar-animated' : '');
+
+    return `<div class="border-bottom py-2" data-campaign-id="${c.id}">
+      <div class="fw-semibold">${c.name}</div>
+      <div class="small text-muted d-flex align-items-center gap-2 flex-wrap mb-1">
+        <span class="campaign-status">${statusBadge(c.status)}</span>
+        <span class="campaign-count">${c.sent_count}/${c.total_contacts} sent</span>
+        ${canResume ? `<button type="button" class="btn btn-sm btn-outline-success btn-resume-campaign" data-id="${c.id}">Resume now</button>` : ''}
+      </div>
+      ${isActive || pct > 0 ? `
+        <div class="progress mt-1" style="height:8px">
+          <div class="progress-bar ${barClass}" style="width:${pct}%"></div>
+        </div>
+        <div class="small text-muted mt-1 campaign-pct">${pct}% complete${c.failed_count ? ` · ${c.failed_count} failed` : ''}</div>
+      ` : ''}
+    </div>`;
+  }
+
+  function updateCampaignProgress(p) {
+    const row = document.querySelector(`[data-campaign-id="${p.id}"]`);
+    if (!row) return;
+
+    const sent = p.sent ?? 0;
+    const failed = p.failed ?? 0;
+    const total = p.total || 0;
+    const done = sent + failed;
+    const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+    const countEl = row.querySelector('.campaign-count');
+    if (countEl) countEl.textContent = `${sent}/${total} sent`;
+
+    const statusEl = row.querySelector('.campaign-status');
+    if (statusEl && p.status) statusEl.innerHTML = statusBadge(p.status);
+
+    const bar = row.querySelector('.progress-bar');
+    if (bar) {
+      bar.style.width = `${pct}%`;
+      bar.classList.toggle('progress-bar-striped', p.status === 'running');
+      bar.classList.toggle('progress-bar-animated', p.status === 'running');
+    }
+
+    const pctEl = row.querySelector('.campaign-pct');
+    if (pctEl) {
+      pctEl.textContent = `${pct}% complete${failed ? ` · ${failed} failed` : ''}`;
+    }
+  }
+
+  function wireResumeButtons() {
+    document.querySelectorAll('.btn-resume-campaign').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          await api(`/api/campaigns/${btn.dataset.id}/resume`, { method: 'POST' });
+          showToast('Campaign resumed');
+          loadReports();
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+    });
+  }
+
+  async function loadReports() {
+    const data = await api('/api/wa/reports');
+
     const dayRows = document.getElementById('day-rows');
     dayRows.innerHTML = data.by_day.length
-      ? data.by_day.map(r => `<tr><td>${r.date}</td><td>${r.sent}</td><td>${r.failed || 0}</td></tr>`).join('')
+      ? data.by_day.map(r => `<tr><td>${formatDate(r.date)}</td><td>${r.sent}</td><td>${r.failed || 0}</td></tr>`).join('')
       : '<tr><td colspan="3" class="text-muted">No data yet</td></tr>';
 
     document.getElementById('sender-rows').innerHTML = data.by_sender.length
@@ -53,16 +122,35 @@
       : '<span class="text-muted">No sender data yet</span>';
 
     document.getElementById('campaign-rows').innerHTML = data.campaigns.length
-      ? data.campaigns.map(c => {
-          const canResume = c.status === 'paused' && c.sent_count + c.failed_count < c.total_contacts;
-          return `<div class="border-bottom py-2">
-            <div class="fw-semibold">${c.name}</div>
-            <div class="small text-muted d-flex align-items-center gap-2 flex-wrap">
-              ${statusBadge(c.status)} ${c.sent_count}/${c.total_contacts} sent
-              ${canResume ? `<button type="button" class="btn btn-sm btn-outline-success" onclick="resumeCampaign(${c.id})">Resume now</button>` : ''}
-            </div>
-          </div>`;
-        }).join('')
+      ? data.campaigns.map(renderCampaignRow).join('')
       : '<span class="text-muted">No campaigns yet</span>';
-  }).catch(err => showToast(err.message, 'error'));
+
+    wireResumeButtons();
+  }
+
+  function scheduleStatsReload() {
+    clearTimeout(statsReloadTimer);
+    statsReloadTimer = setTimeout(() => {
+      loadReports().catch(err => showToast(err.message, 'error'));
+    }, 4000);
+  }
+
+  loadReports().catch(err => showToast(err.message, 'error'));
+
+  pollTimer = setInterval(() => {
+    loadReports().catch(() => {});
+  }, 15000);
+
+  const socket = typeof initSocket === 'function' ? initSocket() : null;
+  if (socket) {
+    socket.on('campaign:progress', payload => {
+      updateCampaignProgress(payload);
+      scheduleStatsReload();
+    });
+  }
+
+  window.addEventListener('beforeunload', () => {
+    clearInterval(pollTimer);
+    clearTimeout(statsReloadTimer);
+  });
 })();
