@@ -102,6 +102,39 @@ router.post('/reconcile-payments', async (_req, res) => {
   }
 });
 
+router.get('/sms/provider-stats', async (_req, res) => {
+  const egosms = await SmsService.getBalance();
+  const { planRate, DEFAULT_RATE } = require('../utils/smsCost');
+
+  const [[lastSend]] = await pool.query(
+    `SELECT cost, currency, sent_at FROM platform_sms_log
+     WHERE status = 'sent' AND cost IS NOT NULL
+     ORDER BY sent_at DESC LIMIT 1`
+  );
+
+  const providerPartCost = parseFloat(process.env.SMS_PROVIDER_COST_UGX || '0') || null;
+
+  res.json({
+    success: true,
+    provider: {
+      name: 'Pahappa / EgoSMS',
+      balance: egosms.balance,
+      currency: egosms.currency || 'UGX',
+      ok: egosms.success,
+      message: egosms.message || (egosms.disabled ? 'SMS gateway not configured or disabled' : null),
+      last_send_cost: lastSend?.cost ? parseFloat(lastSend.cost) : null,
+      estimated_part_cost: providerPartCost
+    },
+    user_rates: {
+      free: planRate('free'),
+      starter: planRate('starter'),
+      business: planRate('business'),
+      enterprise: planRate('enterprise'),
+      default: DEFAULT_RATE
+    }
+  });
+});
+
 router.get('/dashboard', async (req, res) => {
   const stats = await WalletService.platformStats();
   const egosms = await SmsService.getBalance();
@@ -126,6 +159,8 @@ router.get('/dashboard', async (req, res) => {
     stats: {
       ...stats,
       egosms_balance: egosms.balance,
+      egosms_ok: egosms.success,
+      egosms_message: egosms.message || null,
       sms_sent_today: smsToday.total
     },
     recent_transactions: recentTx,

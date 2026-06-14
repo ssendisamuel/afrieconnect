@@ -66,6 +66,10 @@
   api('/api/admin/dashboard').then(data => {
     const s = data.stats;
     document.getElementById('stat-egosms').textContent = Number(s.egosms_balance || 0).toLocaleString();
+    if (!s.egosms_ok && s.egosms_message) {
+      document.querySelector('#stat-egosms')?.closest('.stat-card')
+        ?.insertAdjacentHTML('beforeend', `<div class="small text-warning mt-1">${s.egosms_message}</div>`);
+    }
     document.getElementById('stat-liability').textContent = Number(s.wallet_liability || 0).toLocaleString();
     document.getElementById('stat-topups').textContent = Number(s.topups_today || 0).toLocaleString();
     document.getElementById('stat-spend').textContent = Number(s.sms_spend_today || 0).toLocaleString();

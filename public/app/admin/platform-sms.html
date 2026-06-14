@@ -23,7 +23,29 @@
       content.innerHTML = `
         <div class="mb-4">
           <h1 class="h4 mb-1">Platform SMS</h1>
-          <p class="text-muted mb-0">Send SMS on behalf of the platform</p>
+          <p class="text-muted mb-0">Send SMS on behalf of the platform — admin only</p>
+        </div>
+
+        <div class="row g-3 mb-4" id="provider-stats-row">
+          <div class="col-md-4">
+            <div class="stat-card h-100">
+              <div class="stat-value" id="provider-balance">—</div>
+              <div class="stat-label">Pahappa / EgoSMS Balance (UGX)</div>
+              <div class="small text-muted mt-2" id="provider-balance-note"></div>
+            </div>
+          </div>
+          <div class="col-md-8">
+            <div class="content-card h-100">
+              <h2 class="h6 mb-3">SMS pricing — provider vs your users</h2>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead><tr><th>Plan</th><th>You charge users (UGX/part)</th><th>Provider cost hint</th></tr></thead>
+                  <tbody id="rate-compare-body"><tr><td colspan="3" class="text-muted">Loading…</td></tr></tbody>
+                </table>
+              </div>
+              <p class="small text-muted mb-0 mt-2" id="provider-cost-note">Provider cost comes from EgoSMS send responses or <code>SMS_PROVIDER_COST_UGX</code> in .env.</p>
+            </div>
+          </div>
         </div>
 
         <div class="row g-4">
@@ -172,6 +194,7 @@
             form.message.value = '';
             charCountEl.textContent = '0';
             loadLogs();
+            loadProviderStats();
           } else {
             showToast(result.message || 'Send failed', 'error');
           }
@@ -184,6 +207,33 @@
       });
 
       document.getElementById('btn-refresh-logs').addEventListener('click', loadLogs);
+
+      async function loadProviderStats() {
+        try {
+          const data = await api('/api/admin/sms/provider-stats');
+          const p = data.provider;
+          document.getElementById('provider-balance').textContent = Number(p.balance || 0).toLocaleString();
+          document.getElementById('provider-balance-note').textContent = p.ok
+            ? `${p.name} — live balance`
+            : (p.message || 'Configure and enable SMS under Admin → SMS Gateways');
+
+          const providerHint = p.last_send_cost
+            ? `Last send: UGX ${Number(p.last_send_cost).toLocaleString()} total`
+            : (p.estimated_part_cost ? `~UGX ${Number(p.estimated_part_cost).toLocaleString()} per part (from .env)` : 'Per-part cost from last EgoSMS send');
+
+          const rates = data.user_rates;
+          document.getElementById('rate-compare-body').innerHTML = `
+            <tr><td>Free</td><td>${Number(rates.free).toLocaleString()}</td><td rowspan="4" class="align-middle">${providerHint}</td></tr>
+            <tr><td>Starter</td><td>${Number(rates.starter).toLocaleString()}</td></tr>
+            <tr><td>Business</td><td>${Number(rates.business).toLocaleString()}</td></tr>
+            <tr><td>Enterprise</td><td>${Number(rates.enterprise).toLocaleString()}</td></tr>
+          `;
+        } catch (err) {
+          document.getElementById('provider-balance-note').textContent = err.message;
+        }
+      }
+
+      loadProviderStats();
       loadLogs();
     })();
   </script>

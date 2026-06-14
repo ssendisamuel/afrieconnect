@@ -4,6 +4,7 @@
 
   let activeListId = null;
   let currentPage = 1;
+  let loadedContacts = [];
   const pageLimit = 50;
 
   const content = document.getElementById('page-content');
@@ -46,6 +47,9 @@
               <small class="text-muted" id="list-meta"></small>
             </div>
             <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-danger" id="btn-bulk-delete" disabled>
+                <i class="bi bi-trash me-1"></i>Delete Selected
+              </button>
               <button class="btn btn-sm btn-outline-secondary" id="btn-import" disabled data-bs-toggle="modal" data-bs-target="#import-modal">
                 <i class="bi bi-upload me-1"></i>Import CSV/Excel
               </button>
@@ -57,10 +61,13 @@
           <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
               <thead class="table-light">
-                <tr><th>Name</th><th>Phone</th><th>Email</th><th>Added</th><th></th></tr>
+                <tr>
+                  <th style="width:36px"><input type="checkbox" class="form-check-input" id="select-all-contacts" title="Select all on this page"></th>
+                  <th>Name</th><th>Phone</th><th>Email</th><th>Added</th><th></th>
+                </tr>
               </thead>
               <tbody id="contacts-body">
-                <tr><td colspan="5" class="text-center text-muted py-5">Select a contact list to view contacts</td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-5">Select a contact list to view contacts</td></tr>
               </tbody>
             </table>
           </div>
@@ -153,11 +160,52 @@
         </div>
       </div>
     </div>
+
+    <div class="modal fade" id="edit-contact-modal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header"><h5 class="modal-title">Edit Contact</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+          <form id="edit-contact-form">
+            <div class="modal-body">
+              <input type="hidden" id="edit-contact-id">
+              <div class="mb-3">
+                <label class="form-label">Name</label>
+                <input type="text" class="form-control" id="edit-contact-name">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Phone</label>
+                <input type="tel" class="form-control" id="edit-contact-phone" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-control" id="edit-contact-email">
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   `;
 
   const createListModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('create-list-modal'));
   const addContactModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('add-contact-modal'));
   const importModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('import-modal'));
+  const editContactModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('edit-contact-modal'));
+  const selectedContactIds = new Set();
+
+  function updateBulkDeleteButton() {
+    document.getElementById('btn-bulk-delete').disabled = selectedContactIds.size === 0;
+  }
+
+  function clearContactSelection() {
+    selectedContactIds.clear();
+    document.getElementById('select-all-contacts').checked = false;
+    updateBulkDeleteButton();
+  }
 
   function setListActions(enabled) {
     document.getElementById('btn-add-contact').disabled = !enabled;
@@ -207,29 +255,68 @@
   async function loadContacts() {
     if (!activeListId) return;
 
+    clearContactSelection();
     const tbody = document.getElementById('contacts-body');
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>';
 
     try {
       const data = await api(`/api/contacts/lists/${activeListId}?page=${currentPage}&limit=${pageLimit}`);
-      const { contacts, pagination } = data;
+      const { contacts, pagination, list } = data;
+      loadedContacts = contacts;
+
+      if (list?.contact_count != null) {
+        document.getElementById('list-meta').textContent = `${pagination.total} contact${pagination.total === 1 ? '' : 's'}`;
+        const activeBtn = document.querySelector(`#lists-sidebar [data-id="${activeListId}"]`);
+        if (activeBtn) {
+          activeBtn.dataset.count = pagination.total;
+          const badge = activeBtn.querySelector('.badge');
+          if (badge) badge.textContent = pagination.total;
+        }
+      }
 
       if (!contacts.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5">No contacts in this list</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-5">No contacts in this list</td></tr>';
       } else {
         tbody.innerHTML = contacts.map(c => `
           <tr>
+            <td><input type="checkbox" class="form-check-input contact-select" data-id="${c.id}"></td>
             <td>${c.name || '—'}</td>
             <td class="font-monospace">${c.phone}</td>
             <td>${c.email || '—'}</td>
             <td><small class="text-muted">${formatDate(c.created_at)}</small></td>
-            <td>
+            <td class="text-nowrap">
+              <button class="btn btn-sm btn-outline-secondary btn-edit me-1" data-id="${c.id}">
+                <i class="bi bi-pencil"></i>
+              </button>
               <button class="btn btn-sm btn-outline-danger btn-delete" data-id="${c.id}">
                 <i class="bi bi-trash"></i>
               </button>
             </td>
           </tr>
         `).join('');
+
+        tbody.querySelectorAll('.contact-select').forEach(box => {
+          box.addEventListener('change', () => {
+            const id = Number(box.dataset.id);
+            if (box.checked) selectedContactIds.add(id);
+            else selectedContactIds.delete(id);
+            updateBulkDeleteButton();
+            document.getElementById('select-all-contacts').checked =
+              tbody.querySelectorAll('.contact-select').length === selectedContactIds.size;
+          });
+        });
+
+        tbody.querySelectorAll('.btn-edit').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const contact = loadedContacts.find(c => String(c.id) === btn.dataset.id);
+            if (!contact) return;
+            document.getElementById('edit-contact-id').value = contact.id;
+            document.getElementById('edit-contact-name').value = contact.name || '';
+            document.getElementById('edit-contact-phone').value = contact.phone || '';
+            document.getElementById('edit-contact-email').value = contact.email || '';
+            editContactModal.show();
+          });
+        });
 
         tbody.querySelectorAll('.btn-delete').forEach(btn => {
           btn.addEventListener('click', async () => {
@@ -263,9 +350,64 @@
         bar.style.display = 'none';
       }
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">${err.message}</td></tr>`;
     }
   }
+
+  document.getElementById('select-all-contacts').addEventListener('change', e => {
+    const checked = e.target.checked;
+    document.querySelectorAll('.contact-select').forEach(box => {
+      box.checked = checked;
+      const id = Number(box.dataset.id);
+      if (checked) selectedContactIds.add(id);
+      else selectedContactIds.delete(id);
+    });
+    updateBulkDeleteButton();
+  });
+
+  document.getElementById('btn-bulk-delete').addEventListener('click', async () => {
+    const count = selectedContactIds.size;
+    if (!count) return;
+
+    if (!await confirmDialog({
+      title: `Delete ${count} contact${count === 1 ? '' : 's'}?`,
+      message: 'Selected contacts will be permanently removed from this list.',
+      confirmText: 'Delete selected',
+      variant: 'danger'
+    })) return;
+
+    try {
+      const data = await api('/api/contacts/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids: [...selectedContactIds] })
+      });
+      showToast(`Deleted ${data.deleted} contact${data.deleted === 1 ? '' : 's'}`);
+      loadContacts();
+      loadLists();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  document.getElementById('edit-contact-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = document.getElementById('edit-contact-id').value;
+    const name = document.getElementById('edit-contact-name').value.trim();
+    const phone = document.getElementById('edit-contact-phone').value.trim();
+    const email = document.getElementById('edit-contact-email').value.trim();
+
+    try {
+      await api(`/api/contacts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, phone, email: email || null })
+      });
+      showToast('Contact updated');
+      editContactModal.hide();
+      loadContacts();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
 
   document.getElementById('btn-prev').addEventListener('click', () => {
     if (currentPage > 1) { currentPage--; loadContacts(); }

@@ -39,7 +39,11 @@ router.get('/template.xlsx', (_req, res) => {
 router.get('/lists', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM contact_lists WHERE user_id = ? ORDER BY created_at DESC',
+      `SELECT cl.*,
+        (SELECT COUNT(*) FROM contacts c WHERE c.list_id = cl.id) AS contact_count
+       FROM contact_lists cl
+       WHERE cl.user_id = ?
+       ORDER BY cl.created_at DESC`,
       [req.user.id]
     );
     res.json({ success: true, lists: rows });
@@ -264,6 +268,90 @@ router.delete('/:id', async (req, res) => {
     );
 
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.put('/:id', async (req, res) => {
+  try {
+    const [contact] = await pool.query(
+      'SELECT id, list_id FROM contacts WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (!contact.length) {
+      return res.status(404).json({ success: false, message: 'Contact not found' });
+    }
+
+    const name = req.body.name != null ? String(req.body.name).trim() || null : undefined;
+    const email = req.body.email != null ? String(req.body.email).trim() || null : undefined;
+    let phone;
+
+    if (req.body.phone != null) {
+      phone = normalizePhone(String(req.body.phone).trim());
+      if (phone.length < 10) {
+        return res.status(400).json({ success: false, message: 'Invalid phone number' });
+      }
+
+      const [duplicate] = await pool.query(
+        'SELECT id FROM contacts WHERE list_id = ? AND phone = ? AND id != ?',
+        [contact[0].list_id, phone, req.params.id]
+      );
+      if (duplicate.length) {
+        return res.status(400).json({ success: false, message: 'Another contact in this list already uses that phone number' });
+      }
+    }
+
+    const fields = [];
+    const values = [];
+    if (name !== undefined) { fields.push('name = ?'); values.push(name); }
+    if (phone !== undefined) { fields.push('phone = ?'); values.push(phone); }
+    if (email !== undefined) { fields.push('email = ?'); values.push(email); }
+
+    if (!fields.length) {
+      return res.status(400).json({ success: false, message: 'Nothing to update' });
+    }
+
+    values.push(req.params.id, req.user.id);
+    await pool.query(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`, values);
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/bulk-delete', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids)
+      ? req.body.ids.map(id => parseInt(id, 10)).filter(id => id > 0)
+      : [];
+
+    if (!ids.length) {
+      return res.status(400).json({ success: false, message: 'Select at least one contact' });
+    }
+
+    const [rows] = await pool.query(
+      'SELECT id, list_id FROM contacts WHERE id IN (?) AND user_id = ?',
+      [ids, req.user.id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: 'No matching contacts found' });
+    }
+
+    await pool.query('DELETE FROM contacts WHERE id IN (?) AND user_id = ?', [ids, req.user.id]);
+
+    const listIds = [...new Set(rows.map(r => r.list_id))];
+    for (const listId of listIds) {
+      await pool.query(
+        'UPDATE contact_lists SET contact_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ?) WHERE id = ?',
+        [listId, listId]
+      );
+    }
+
+    res.json({ success: true, deleted: rows.length });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
