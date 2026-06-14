@@ -209,10 +209,14 @@ class CampaignRunner {
       campaign.delay_seconds = fresh[0].delay_seconds ?? campaign.delay_seconds;
       campaign.daily_cap = fresh[0].daily_cap ?? campaign.daily_cap;
 
-      if (fresh[0].status === 'paused') {
-        control.paused = true;
+      if (fresh[0].status === 'paused' && control.paused) {
         while (control.paused && !control.stopped) {
           await new Promise(r => setTimeout(r, 1000));
+          const [check] = await pool.query('SELECT status FROM campaigns WHERE id = ?', [campaignId]);
+          if (check[0].status === 'running') {
+            control.paused = false;
+            break;
+          }
         }
         if (control.stopped) break;
       }
@@ -360,20 +364,30 @@ class CampaignRunner {
     }
   }
 
-  pauseCampaign(campaignId) {
+  async pauseCampaign(campaignId) {
     campaignId = Number(campaignId);
     const control = this.active.get(campaignId);
     if (control) control.paused = true;
-    return pool.query("UPDATE campaigns SET status = 'paused' WHERE id = ?", [campaignId]);
+    await pool.query("UPDATE campaigns SET status = 'paused' WHERE id = ?", [campaignId]);
+    return { success: true };
   }
 
-  resumeCampaign(campaignId) {
+  async resumeCampaign(campaignId) {
     campaignId = Number(campaignId);
+
+    const [rows] = await pool.query('SELECT * FROM campaigns WHERE id = ?', [campaignId]);
+    if (!rows.length) throw new Error('Campaign not found');
+
+    await pool.query("UPDATE campaigns SET status = 'running' WHERE id = ?", [campaignId]);
+
     const control = this.active.get(campaignId);
     if (control) {
       control.paused = false;
-      return { success: true, message: 'Campaign resumed' };
+      const campaign = { ...rows[0], status: 'running' };
+      this.emitProgress(rows[0].user_id, campaign);
+      return { success: true, message: 'Campaign resumed', status: 'running' };
     }
+
     return this.runCampaign(campaignId);
   }
 

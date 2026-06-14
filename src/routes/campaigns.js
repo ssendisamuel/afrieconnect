@@ -71,13 +71,21 @@ router.post('/:id/send', async (req, res) => {
 });
 
 router.post('/:id/pause', async (req, res) => {
-  await CampaignRunner.pauseCampaign(req.params.id);
-  res.json({ success: true, message: 'Campaign paused' });
+  try {
+    await CampaignRunner.pauseCampaign(req.params.id);
+    res.json({ success: true, message: 'Campaign paused' });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 });
 
 router.post('/:id/resume', async (req, res) => {
-  await CampaignRunner.resumeCampaign(req.params.id);
-  res.json({ success: true, message: 'Campaign resumed' });
+  try {
+    const result = await CampaignRunner.resumeCampaign(req.params.id);
+    res.json({ success: true, message: 'Campaign resumed', ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 });
 
 router.patch('/:id/settings', [

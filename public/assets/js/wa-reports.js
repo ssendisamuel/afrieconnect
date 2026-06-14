@@ -108,7 +108,7 @@
         try {
           await api(`/api/campaigns/${btn.dataset.id}/resume`, { method: 'POST' });
           showToast('Campaign resumed');
-          loadReports();
+          setTimeout(loadReports, 500);
         } catch (err) {
           showToast(err.message, 'error');
         }
