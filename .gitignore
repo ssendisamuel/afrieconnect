@@ -1,0 +1,8 @@
+node_modules/
+.env
+SMS_API_CREDENTIALS_PRIVATE.md
+wa_sessions/
+uploads/
+logs/
+*.log
+.DS_Store

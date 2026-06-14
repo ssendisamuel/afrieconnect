@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sender IDs - AfrieConnect Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="/assets/css/app.css" rel="stylesheet">
+</head>
+<body>
+<div id="app-shell"></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/assets/js/app.js"></script>
+<script>
+(function () {
+  if (!requireAuth() || !requireAdmin()) return;
+  renderAppShell('admin-sender-ids');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="mb-4">
+      <h4 class="mb-1 fw-bold">Sender ID Requests</h4>
+      <p class="text-muted mb-0">Approve or reject customer sender IDs for SMS.</p>
+    </div>
+    <div class="content-card">
+      <div id="loading" class="text-center py-4 text-muted">Loading…</div>
+      <div class="table-responsive d-none" id="table-wrap">
+        <table class="table table-hover align-middle mb-0">
+          <thead><tr><th>User</th><th>Sender ID</th><th>Requested</th><th>Actions</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="text-muted text-center py-4 d-none">No pending requests.</p>
+    </div>
+  `;
+
+  async function load() {
+    const data = await api('/api/sender-ids/admin/pending');
+    document.getElementById('loading').classList.add('d-none');
+    const rows = data.requests || [];
+    if (!rows.length) {
+      document.getElementById('empty').classList.remove('d-none');
+      return;
+    }
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td><strong>${r.user_name}</strong><br><span class="small text-muted">${r.user_email}</span></td>
+        <td><code>${r.sender_id}</code></td>
+        <td class="small text-muted">${formatDate(r.created_at)}</td>
+        <td>
+          <button class="btn btn-sm btn-success me-1" data-action="approve" data-id="${r.id}">Approve</button>
+          <button class="btn btn-sm btn-outline-danger" data-action="reject" data-id="${r.id}">Reject</button>
+        </td>
+      </tr>
+    `).join('');
+    document.getElementById('table-wrap').classList.remove('d-none');
+    tbody.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const status = btn.dataset.action === 'approve' ? 'approved' : 'rejected';
+        const notes = status === 'rejected' ? prompt('Rejection reason (optional):') || '' : '';
+        try {
+          await api(`/api/sender-ids/admin/${btn.dataset.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status, notes })
+          });
+          showToast(`Sender ID ${status}`);
+          load();
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      });
+    });
+  }
+
+  load().catch(err => showToast(err.message, 'error'));
+})();
+</script>
+</body>
+</html>

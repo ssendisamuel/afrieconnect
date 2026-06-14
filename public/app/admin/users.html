@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Users - AfrieConnect Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="/assets/css/app.css" rel="stylesheet">
+</head>
+<body>
+  <div id="app-shell"></div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script>
+    (function () {
+      if (!requireAuth() || !requireAdmin()) return;
+      renderAppShell('admin-users');
+
+      document.getElementById('page-content').innerHTML = `
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+          <div>
+            <h4 class="mb-1 fw-bold">Users</h4>
+            <p class="text-muted mb-0">Manage accounts, wallet balances, and plans</p>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4" id="user-stats">
+          <div class="col-md-3"><div class="stat-card"><div class="stat-value" id="stat-total">—</div><div class="stat-label">Total Users</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-value text-success" id="stat-active">—</div><div class="stat-label">Active</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-value text-warning" id="stat-pending">—</div><div class="stat-label">Pending</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-value" id="stat-wallet">—</div><div class="stat-label">Total Wallet (UGX)</div></div></div>
+        </div>
+
+        <div class="content-card mb-4">
+          <div class="row g-3 align-items-end">
+            <div class="col-lg-4">
+              <label class="form-label small fw-semibold text-muted">Search</label>
+              <div class="input-group">
+                <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                <input type="text" class="form-control" id="filter-search" placeholder="Name or email…">
+              </div>
+            </div>
+            <div class="col-md-3 col-lg-2">
+              <label class="form-label small fw-semibold text-muted">Plan</label>
+              <select class="form-select" id="filter-plan">
+                <option value="">All plans</option>
+                <option value="free">Free</option>
+                <option value="starter">Starter</option>
+                <option value="business">Business</option>
+                <option value="enterprise">Enterprise</option>
+              </select>
+            </div>
+            <div class="col-md-3 col-lg-2">
+              <label class="form-label small fw-semibold text-muted">Status</label>
+              <select class="form-select" id="filter-status">
+                <option value="">All statuses</option>
+                <option value="active">Active</option>
+                <option value="pending">Pending</option>
+                <option value="suspended">Suspended</option>
+              </select>
+            </div>
+            <div class="col-md-6 col-lg-2">
+              <button class="btn btn-primary w-100" id="btn-filter">Apply</button>
+            </div>
+            <div class="col-md-6 col-lg-2">
+              <button class="btn btn-outline-secondary w-100" id="btn-clear">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="content-card p-0 overflow-hidden">
+          <div id="users-loading" class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2 mb-0">Loading users…</p>
+          </div>
+          <div id="users-error" class="alert alert-danger m-3 d-none"></div>
+          <div class="table-responsive" id="users-table-wrap" style="display:none">
+            <table class="table table-hover align-middle mb-0 admin-users-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Phone</th>
+                  <th>Plan</th>
+                  <th>Status</th>
+                  <th>Wallet (UGX)</th>
+                  <th>WhatsApp</th>
+                  <th>Joined</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody"></tbody>
+            </table>
+          </div>
+          <p id="users-empty" class="text-muted text-center py-5 d-none">No users match your filters.</p>
+        </div>
+      `;
+
+      const searchEl = document.getElementById('filter-search');
+      const planEl = document.getElementById('filter-plan');
+      const statusEl = document.getElementById('filter-status');
+      const loadingEl = document.getElementById('users-loading');
+      const errorEl = document.getElementById('users-error');
+      const tableWrap = document.getElementById('users-table-wrap');
+      const tbody = document.getElementById('users-tbody');
+      const emptyEl = document.getElementById('users-empty');
+
+      function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      function initials(name) {
+        return String(name || '?').split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase();
+      }
+
+      function planBadge(plan) {
+        const colors = {
+          free: 'secondary',
+          starter: 'primary',
+          business: 'info',
+          enterprise: 'dark'
+        };
+        return `<span class="badge bg-${colors[plan] || 'light'} ${plan === 'free' ? '' : ''}">${escapeHtml(plan)}</span>`;
+      }
+
+      function updateStats(users) {
+        document.getElementById('stat-total').textContent = users.length;
+        document.getElementById('stat-active').textContent = users.filter(u => u.status === 'active').length;
+        document.getElementById('stat-pending').textContent = users.filter(u => u.status === 'pending').length;
+        const walletTotal = users.reduce((sum, u) => sum + (parseFloat(u.wallet_balance) || 0), 0);
+        document.getElementById('stat-wallet').textContent = walletTotal.toLocaleString();
+      }
+
+      async function loadUsers() {
+        loadingEl.style.display = 'block';
+        errorEl.classList.add('d-none');
+        tableWrap.style.display = 'none';
+        emptyEl.classList.add('d-none');
+
+        const params = new URLSearchParams();
+        if (planEl.value) params.set('plan', planEl.value);
+        if (statusEl.value) params.set('status', statusEl.value);
+        if (searchEl.value.trim()) params.set('search', searchEl.value.trim());
+
+        try {
+          const data = await api(`/api/admin/users?${params.toString()}`);
+          const users = data.users || [];
+          loadingEl.style.display = 'none';
+          updateStats(users);
+
+          if (!users.length) {
+            emptyEl.classList.remove('d-none');
+            return;
+          }
+
+          tbody.innerHTML = users.map(u => `
+            <tr class="user-row" data-id="${u.id}" style="cursor:pointer">
+              <td>
+                <div class="d-flex align-items-center gap-3">
+                  <div class="user-avatar-sm">${initials(u.name)}</div>
+                  <div>
+                    <div class="fw-semibold">${escapeHtml(u.name)}</div>
+                    <div class="small text-muted">${escapeHtml(u.email)}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="text-muted">${escapeHtml(u.phone || '—')}</td>
+              <td>${planBadge(u.plan)}</td>
+              <td>${statusBadge(u.status)}</td>
+              <td><span class="fw-semibold">${Number(u.wallet_balance || 0).toLocaleString()}</span></td>
+              <td>${u.wa_connected > 0 ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Connected</span>' : (u.wa_status ? statusBadge(u.wa_status) : '<span class="text-muted">—</span>')}</td>
+              <td class="text-muted small">${formatDate(u.created_at)}</td>
+              <td class="text-end">
+                <a href="/app/admin/user-detail.html?id=${u.id}" class="btn btn-sm btn-light border" onclick="event.stopPropagation()">
+                  <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+              </td>
+            </tr>
+          `).join('');
+
+          tableWrap.style.display = 'block';
+          tbody.querySelectorAll('.user-row').forEach(row => {
+            row.addEventListener('click', () => {
+              window.location.href = `/app/admin/user-detail.html?id=${row.dataset.id}`;
+            });
+          });
+        } catch (err) {
+          loadingEl.style.display = 'none';
+          errorEl.textContent = err.message;
+          errorEl.classList.remove('d-none');
+        }
+      }
+
+      document.getElementById('btn-filter').addEventListener('click', loadUsers);
+      document.getElementById('btn-clear').addEventListener('click', () => {
+        searchEl.value = '';
+        planEl.value = '';
+        statusEl.value = '';
+        loadUsers();
+      });
+      searchEl.addEventListener('keydown', e => { if (e.key === 'Enter') loadUsers(); });
+      loadUsers();
+    })();
+  </script>
+</body>
+</html>
