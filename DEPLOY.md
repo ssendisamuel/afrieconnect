@@ -1,37 +1,84 @@
 # Deploy AfrieConnect to afrieconnect.afriezon.com
 
-Target server path: `/home/afriezon/afrieconnect.afriezon.com`  
-GitHub repo: `https://github.com/ssendisamuel/afrieconnect`
+**App root (subdomain document root):** `/home/afriezon/afrieconnect.afriezon.com`  
+**GitHub:** `https://github.com/ssendisamuel/afrieconnect`
+
+cPanel created `afrieconnect.afriezon.com` as the subdomain’s public folder. Deploy **inside that folder** — do not clone into a different path. PM2, `.env`, `node_modules`, and the app code all live here.
+
+Express serves the UI from `public/` on port **3600**. Apache/Nginx must **proxy** the subdomain to Node (do not rely on Apache serving static files alone, or API routes will 404).
 
 ## 1. Server prerequisites
 
 - Node.js 18+ and npm
-- MySQL database (already created in cPanel)
+- MySQL database (cPanel)
 - PM2: `npm install -g pm2`
-- Reverse proxy (Apache/Nginx) to port `3600`
+- Reverse proxy from `afrieconnect.afriezon.com` → `http://127.0.0.1:3600`
 
 ## 2. Database (cPanel)
 
-From your hosting panel you created:
-
-| Setting | Value |
-|---------|--------|
+| Setting  | Value              |
+|----------|--------------------|
 | Database | `afriezon_afrieco` |
-| User | `afriezon_afrieco` |
-| Host | `localhost` |
-| Password | *(set in panel — do not commit to git)* |
+| User     | `afriezon_afrieco` |
+| Host     | `localhost`        |
+| Password | *(cPanel only — never commit)* |
 
-The app runs migrations automatically on startup. You do **not** need to import `db/schema.sql` manually if the app starts successfully.
+Migrations run automatically on startup. On a **fresh empty database**, the app creates base tables from `db/schema.sql` automatically.
 
-## 3. First deploy
+If startup still fails with missing tables, import manually:
 
 ```bash
-cd /home/afriezon
-git clone https://github.com/ssendisamuel/afrieconnect.git afrieconnect.afriezon.com
-cd afrieconnect.afriezon.com
-npm install --production
+cd /home/afriezon/afrieconnect.afriezon.com
+grep -v -E '^(CREATE DATABASE|^USE )' db/schema.sql | mysql -u afriezon_afrieco -p afriezon_afrieco
+node src/seed.js
+pm2 restart afrieconnect --update-env
+```
+
+## 3. First deploy (inside the subdomain folder)
+
+```bash
+cd /home/afriezon/afrieconnect.afriezon.com
+```
+
+### If the folder is empty (or only has a default cPanel `index.html`)
+
+Clone **into the current directory** (note the `.` at the end):
+
+```bash
+git clone https://github.com/ssendisamuel/afrieconnect.git .
+```
+
+### If the folder exists but is not a git repo (your earlier error)
+
+Back up anything you need, clear the folder, then clone in place:
+
+```bash
+cd /home/afriezon/afrieconnect.afriezon.com
+ls -la
+# remove stray files only — keep the folder itself (it is the subdomain docroot)
+rm -rf ./* ./.[!.]* 2>/dev/null
+git clone https://github.com/ssendisamuel/afrieconnect.git .
+```
+
+### If the repo is private
+
+```bash
+git clone https://YOUR_GITHUB_USER:YOUR_TOKEN@github.com/ssendisamuel/afrieconnect.git .
+```
+
+### Install and configure
+
+```bash
+cd /home/afriezon/afrieconnect.afriezon.com
+npm install --omit=dev
 cp .env.production.example .env
-nano .env   # fill DB password, JWT_SECRET, Flutterwave, EgoSMS, SMTP
+nano .env
+```
+
+Confirm `package.json` exists:
+
+```bash
+ls package.json server.js ecosystem.config.js
 ```
 
 Required production values in `.env`:
@@ -44,39 +91,63 @@ Required production values in `.env`:
 
 ## 4. Start with PM2
 
+Run from the same subdomain folder:
+
 ```bash
+cd /home/afriezon/afrieconnect.afriezon.com
 pm2 start ecosystem.config.js --env production
 pm2 save
 pm2 startup
 ```
 
-## 5. Reverse proxy
+Check:
 
-Point `afrieconnect.afriezon.com` to `http://127.0.0.1:3600`.
+```bash
+pm2 status
+curl -s http://127.0.0.1:3600/api/health
+```
 
-**Flutterwave webhook:** `https://afrieconnect.afriezon.com/api/payments/webhook`  
-Configure in Admin → Payment Gateways.
+## 5. Reverse proxy (subdomain → Node)
 
-**SMS webhooks (EgoSMS):**
+Point `afrieconnect.afriezon.com` at `http://127.0.0.1:3600`.
 
-- DLR: `https://afrieconnect.afriezon.com/api/sms/webhook/dlr`
-- Inbound: `https://afrieconnect.afriezon.com/api/sms/webhook/inbound`
+**Apache (cPanel)** — create or edit `.htaccess` in this folder:
+
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)$ http://127.0.0.1:3600/$1 [P,L]
+```
+
+Proxy module must be enabled in cPanel (Apache Configuration → Include Editor, or ask host to enable `mod_proxy`).
+
+**Or** use cPanel **Setup Node.js App** with application root = `/home/afriezon/afrieconnect.afriezon.com` and startup file `server.js`.
+
+**Webhooks**
+
+- Flutterwave: `https://afrieconnect.afriezon.com/api/payments/webhook`
+- SMS DLR: `https://afrieconnect.afriezon.com/api/sms/webhook/dlr`
+- SMS inbound: `https://afrieconnect.afriezon.com/api/sms/webhook/inbound`
+
+Configure Flutterwave in Admin → Payment Gateways.
 
 ## 6. Updates
+
+Always work from the subdomain folder:
 
 ```bash
 cd /home/afriezon/afrieconnect.afriezon.com
 git pull origin main
-npm install --production
+npm install --omit=dev
 pm2 restart afrieconnect
 ```
 
 ## 7. WhatsApp sessions
 
-The `wa_sessions/` folder must persist across restarts. Do not delete it on deploy.
+`wa_sessions/` must persist in this folder across restarts. Do not delete it on deploy.
 
-## 8. Security notes
+## 8. Security
 
 - Never commit `.env` to GitHub
-- Rotate the DB password if it was shared in chat
-- Set `SMS_WEBHOOK_SECRET` and append `?secret=...` to SMS webhook URLs if desired
+- Rotate DB password if it was shared in chat
+- Optional: set `SMS_WEBHOOK_SECRET` and append `?secret=...` to SMS webhook URLs

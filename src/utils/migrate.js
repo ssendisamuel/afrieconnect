@@ -16,22 +16,50 @@ async function tableExists(pool, table) {
   return rows[0].n > 0;
 }
 
+async function ensureBaseSchema(pool) {
+  if (await tableExists(pool, 'users')) return;
+
+  const fs = require('fs');
+  const path = require('path');
+  const schemaPath = path.join(__dirname, '../../db/schema.sql');
+  let sql = fs.readFileSync(schemaPath, 'utf8');
+  sql = sql
+    .replace(/^CREATE DATABASE[\s\S]*?;\s*/im, '')
+    .replace(/^USE [\s\S]*?;\s*/im, '');
+
+  const statements = sql
+    .split(';')
+    .map(s => s.trim())
+    .filter(s => s && !s.startsWith('--'));
+
+  for (const stmt of statements) {
+    await pool.query(stmt);
+  }
+
+  console.log('[Migrate] Base schema created from db/schema.sql');
+}
+
 async function runMigrations(pool) {
-  try {
-    await pool.query(`
-      ALTER TABLE campaigns
-      MODIFY status ENUM('draft','queued','running','paused','completed','failed','cancelled') DEFAULT 'draft'
-    `);
-  } catch (err) {
-    if (!/Duplicate|already exists/i.test(err.message)) {
-      console.warn('[Migrate] campaigns status:', err.message);
+  await ensureBaseSchema(pool);
+
+  if (await tableExists(pool, 'campaigns')) {
+    try {
+      await pool.query(`
+        ALTER TABLE campaigns
+        MODIFY status ENUM('draft','queued','running','paused','completed','failed','cancelled') DEFAULT 'draft'
+      `);
+    } catch (err) {
+      if (!/Duplicate|already exists/i.test(err.message)) {
+        console.warn('[Migrate] campaigns status:', err.message);
+      }
+    }
+
+    if (!(await columnExists(pool, 'campaigns', 'campaign_url'))) {
+      await pool.query('ALTER TABLE campaigns ADD COLUMN campaign_url VARCHAR(500) NULL AFTER message');
     }
   }
 
-  if (!(await columnExists(pool, 'campaigns', 'campaign_url'))) {
-    await pool.query('ALTER TABLE campaigns ADD COLUMN campaign_url VARCHAR(500) NULL AFTER message');
-  }
-
+  if (await tableExists(pool, 'message_logs')) {
   for (const col of ['batch_id', 'tracking_code', 'cost', 'currency']) {
     if (!(await columnExists(pool, 'message_logs', col))) {
       const defs = {
@@ -42,6 +70,7 @@ async function runMigrations(pool) {
       };
       await pool.query(`ALTER TABLE message_logs ADD COLUMN ${col} ${defs[col]}`);
     }
+  }
   }
 
   if (!(await tableExists(pool, 'sms_inbox'))) {
@@ -59,7 +88,7 @@ async function runMigrations(pool) {
     `);
   }
 
-  if (!(await columnExists(pool, 'users', 'wallet_balance'))) {
+  if (await tableExists(pool, 'users') && !(await columnExists(pool, 'users', 'wallet_balance'))) {
     await pool.query('ALTER TABLE users ADD COLUMN wallet_balance DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER sms_credits');
     const rate = parseFloat(process.env.SMS_RATE_UGX || '40');
     await pool.query('UPDATE users SET wallet_balance = sms_credits * ? WHERE sms_credits > 0', [rate]);
